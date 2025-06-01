@@ -1,0 +1,34 @@
+services:
+  dnscrypt-proxy:
+    build: ./dnscrypt-proxy
+    container_name: dnscrypt-proxy
+    restart: unless-stopped
+    networks:
+      internal:
+        ipv4_address: 172.25.0.2
+    healthcheck:
+      test: ["CMD", "drill", "cloudflare.com", "@127.0.0.1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  app:
+    build: ./app
+    container_name: app
+    depends_on:
+      dnscrypt-proxy:
+        condition: service_healthy
+    networks:
+      internal:
+        ipv4_address: 172.25.0.3
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    dns:
+      - 172.25.0.2
+
+networks:
+  internal:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.25.0.0/16
