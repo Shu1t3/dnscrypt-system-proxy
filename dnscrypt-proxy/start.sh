@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env sh
 
 echo "[+] Starting dnscrypt-proxy..."
-dnscrypt-proxy -config /etc/dnscrypt-proxy/dnscrypt-proxy.toml
+exec dnscrypt-proxy -config /etc/dnscrypt-proxy/dnscrypt-proxy.toml

@@ -1,34 +1,57 @@
 services:
+
   dnscrypt-proxy:
     build: ./dnscrypt-proxy
-    container_name: dnscrypt-proxy
+    container_name: dnscrypt-proxy-new
     restart: unless-stopped
     networks:
-      internal:
-        ipv4_address: 172.25.0.2
+      public_net:
+      isolated_net:
+        ipv4_address: 172.28.0.2
     healthcheck:
-      test: ["CMD", "drill", "cloudflare.com", "@127.0.0.1"]
-      interval: 10s
-      timeout: 3s
+      test: ["CMD", "drill", "google.com", "@127.0.0.1"]
+      interval: 30s
+      timeout: 10s
       retries: 3
+      start_period: 20s
+
+  squid:
+    build: ./squid
+    container_name: squid-proxy
+    restart: unless-stopped
+    networks:
+      - public_net
 
   app:
     build: ./app
-    container_name: app
+    container_name: test-app-new
+    restart: unless-stopped
     depends_on:
       dnscrypt-proxy:
         condition: service_healthy
     networks:
-      internal:
-        ipv4_address: 172.25.0.3
+      - public_net
+      - isolated_net
+    ports:
+      - "8000:8000"
     environment:
       - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - HTTP_PROXY=http://squid:3128
+      - HTTPS_PROXY=http://squid:3128
+      - NO_PROXY=172.28.0.2,localhost,127.0.0.1
     dns:
-      - 172.25.0.2
+      - 172.28.0.2
+    cap_add:
+      - NET_ADMIN
+    entrypoint: ["/entrypoint.sh"]
+    command: ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 networks:
-  internal:
+  public_net:
     driver: bridge
+  isolated_net:
+    driver: bridge
+    internal: true
     ipam:
       config:
-        - subnet: 172.25.0.0/16
+        - subnet: 172.28.0.0/16

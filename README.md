@@ -1,62 +1,185 @@
-# Сервис Docker Compose: `dnscrypt-proxy` и `app`
+# DNS Leak Test Service with dnscrypt-proxy & squid
 
-Этот репозиторий содержит конфигурацию для разворачивания двух взаимозависимых сервисов с помощью Docker Compose:
-1. **dnscrypt-proxy** — локальный прокси для DNS-запросов, обеспечивающий шифрование и анонимность.
-2. **app** — любое приложение, которое зависимо от работоспособности DNS-прокси и использует его в качестве DNS-сервера.
+Изолированная сетевая инфраструктура для тестирования DNS-утечек и безопасной маршрутизации трафика через шифрованный DNS и HTTP прокси.
 
----
+## Архитектура
 
-## Содержание
+```
+┌──────────────────┐
+│ app:8000         │ FastAPI DNS Leak Tester
+│ iptables rules   │ (NET_ADMIN cap)
+│ - Allow:         │
+│   • DNS → :53    │
+│   • HTTP → :3128 │
+└────────┬─────────┘
+         │
+    ┌────┴─────┐
+    ▼          ▼
+┌────────────────┐    ┌──────────────────┐
+│ dnscrypt-proxy │    │ squid (tinyproxy)│
+│ 172.28.0.2:53  │    │ :3128            │
+│ (DNS-over-TLS) │    │ (HTTP/HTTPS)     │
+└────────┬───────┘    └────────┬─────────┘
+         │                     │
+         └──────────┬──────────┘
+                    │
+              ┌─────▼──────┐
+              │ public_net  │
+              │ (bridge)    │
+              └─────┬───────┘
+                    │
+              Internet (external)
+```
 
-1. [Описание сервисов](#описание-сервисов)  
-   1.1. [dnscrypt-proxy](#dnscrypt-proxy)  
-   1.2. [app](#app)  
-2. [Требования](#требования)  
-3. [Структура репозитория](#структура-репозитория)  
-4. [Переменные окружения](#переменные-окружения)  
-5. [Установка и запуск](#установка-и-запуск)  
-6. [Сетевые настройки](#сетевые-настройки)  
-7. [Проверка работоспособности](#проверка-работоспособности)  
-8. [Полезные команды](#полезные-команды)  
-9. [Лицензия](#лицензия)  
+**Две изолированные Docker сети:**
+- `public_net` — доступ в интернет (для squid и dnscrypt-proxy)
+- `isolated_net` — только для dnscrypt-proxy и app (внутренняя, внешние контейнеры не видят)
 
----
+## Компоненты
 
-## Описание сервисов
-
-### dnscrypt-proxy
-
-- **Назначение**:  
-  `dnscrypt-proxy` выступает локальным прокси-сервером для DNS-запросов, шифруя их и пересылая к выбранному внешнему DNS-серверу (например, Cloudflare). Это повышает приватность и защищенность DNS-трафика.
-
-- **Ключевые параметры в `docker-compose.yml`**:
-  - `build: ./dnscrypt-proxy` — сборка образа из директории `./dnscrypt-proxy`.
-  - `container_name: dnscrypt-proxy` — имя контейнера.
-  - `restart: unless-stopped` — перезапуск контейнера в случае сбоя, если он явно не остановлен.
-  - `networks.internal.ipv4_address: 172.25.0.2` — статический внутренний IP-адрес в мостовой сети `internal`.
-  - `healthcheck`:
-    - `test: ["CMD", "drill", "cloudflare.com", "@127.0.0.1"]` — проверка, что DNS-прокси отвечает на запросы к домену например `cloudflare.com`.
-    - `interval: 10s`, `timeout: 3s`, `retries: 3` — параметры интервала проверки, таймаута и числа попыток.
-
-### app
-
-- **Назначение**:  
-  Основное приложение, которое при запуске использует DNS-прокси для всех своих DNS-запросов. В переменной окружения передаётся `GEMINI_API_KEY` (например, для доступа к API Gemini или иным сервисам).
-
-- **Ключевые параметры в `docker-compose.yml`**:
-  - `build: ./app` — сборка образа из директории `./app`.
-  - `container_name: app` — имя контейнера.
-  - `depends_on.dnscrypt-proxy.condition: service_healthy` — ожидание успешного прохождения healthcheck контейнера `dnscrypt-proxy` перед запуском `app`.
-  - `networks.internal.ipv4_address: 172.25.0.3` — статический внутренний IP-адрес в мостовой сети `internal`.
-  - `environment: - GEMINI_API_KEY=${GEMINI_API_KEY}` — передача переменной окружения из хоста.
-  - `dns: - 172.25.0.2` — указание использовать локальный DNS-сервер (контейнер `dnscrypt-proxy`).
-
----
+| Компонент | Описание | Образ | Порт |
+|-----------|---------|-------|------|
+| **dnscrypt-proxy** | DNS-прокси с шифрованием | Alpine + dnscrypt-proxy | 172.28.0.2:53 |
+| **squid** | HTTP/HTTPS прокси | Alpine + tinyproxy | 3128 |
+| **app** | FastAPI тестер DNS-утечек | Python 3.13 + FastAPI | 8000 |
 
 ## Требования
 
-1. **Docker**
-2. **Docker Compose**
-3. **Переменная окружения** `GEMINI_API_KEY` должна быть определена на хостовой машине, если приложение `app` действительно использует этот ключ.
+- Docker (с поддержкой COPY --chmod)
+- Docker Compose v2+
+- GEMINI_API_KEY (для тестов с Gemini API)
 
----
+## Быстрый старт
+
+```bash
+# 1. Клонирование
+git clone https://github.com/Shu1t3/dnscrypt-system-proxy.git
+cd dnscrypt-system-proxy
+
+# 2. Создание .env
+echo "GEMINI_API_KEY=sk-..." > .env
+
+# 3. Запуск
+docker-compose up -d
+
+# 4. Проверка
+docker-compose ps
+curl http://localhost:8000/health
+```
+
+## API Endpoints
+
+### GET `/health`
+Проверка здоровья сервиса.
+
+```bash
+curl http://localhost:8000/health
+# {"status": "healthy"}
+```
+
+### GET `/dns-info`
+Информация о текущих DNS серверах и проверка разрешения доменов.
+
+```bash
+curl http://localhost:8000/dns-info
+```
+
+**Ответ:**
+```json
+{
+  "dns_servers": ["172.28.0.2"],
+  "hostname": "...",
+  "test_domains": {
+    "google.com": {"resolved_to": "142.250.185.46", "status": "OK"},
+    "cloudflare.com": {"resolved_to": "104.16.132.229", "status": "OK"}
+  }
+}
+```
+
+### POST `/ask?prompt=...`
+Отправить запрос к Gemini API и получить ответ с информацией о DNS.
+
+```bash
+curl "http://localhost:8000/ask?prompt=Привет"
+```
+
+### GET `/test`
+Комплексный тест: проверка DNS, разрешение доменов, запрос к Gemini API.
+
+```bash
+curl http://localhost:8000/test
+```
+
+## Проверка DNS-утечек
+
+1. **Убедитесь, что используется правильный DNS:**
+```bash
+curl http://localhost:8000/dns-info | jq '.dns_servers'
+# ["172.28.0.2"]  ← должно быть именно это
+```
+
+2. **Проверьте iptables правила в контейнере app:**
+```bash
+docker-compose exec app iptables -L -n
+# Должны быть разрешены только:
+# - loopback
+# - established connections
+# - DNS (172.28.0.2:53)
+# - HTTP to squid (3128)
+```
+
+3. **Просмотрите логи squid (HTTP прокси):**
+```bash
+docker-compose logs squid | grep -i request
+```
+
+## Структура проекта
+
+```
+├── docker-compose.yml      # Main config
+├── .gitattributes         # Enforce LF for scripts
+│
+├── dnscrypt-proxy/
+│   ├── Dockerfile
+│   ├── start.sh
+│   └── dnscrypt-proxy.toml
+│
+├── squid/
+│   └── Dockerfile
+│
+└── app/
+    ├── Dockerfile
+    ├── main.py            # FastAPI app
+    ├── entrypoint.sh      # Setup iptables + run uvicorn
+    └── requirements.txt
+```
+
+## Полезные команды
+
+```bash
+# Логи
+docker-compose logs -f app
+docker-compose logs -f dnscrypt-proxy
+docker-compose logs -f squid
+
+# Выполнить команду в контейнере
+docker-compose exec app bash
+docker-compose exec app iptables -L -n
+
+# Перезапуск
+docker-compose restart app
+
+# Остановка
+docker-compose down
+
+# Остановка с удалением volumes
+docker-compose down -v
+```
+
+## Лицензия
+
+MIT License
+
+## Автор
+
+Shu1t3
