@@ -58,6 +58,7 @@ cd dnscrypt-system-proxy
 
 # 2. Создание .env
 echo "GEMINI_API_KEY=sk-..." > .env
+echo "DNS_PROVIDER=comss-doh" >> .env
 
 # 3. Запуск
 docker-compose up -d
@@ -66,6 +67,55 @@ docker-compose up -d
 docker-compose ps
 curl http://localhost:8000/health
 ```
+
+## Конфигурация DNS
+
+### Переключатель DNS провайдера
+
+Отредактируйте `.env` чтобы выбрать DNS провайдер:
+
+```bash
+# Доступные опции:
+DNS_PROVIDER=comss-doh    # По умолчанию (Cloudflare через router.comss.one)
+DNS_PROVIDER=xbox-dns     # Xbox DNS (xboxdns.ru)
+```
+
+Или установите переменную окружения перед запуском:
+
+```powershell
+# PowerShell
+$env:DNS_PROVIDER="xbox-dns"
+docker-compose up -d
+
+# Bash
+export DNS_PROVIDER="xbox-dns"
+docker-compose up -d
+```
+
+Проверить текущего DNS провайдера:
+
+```bash
+docker-compose logs dnscrypt-proxy --tail=5
+# [+] DNS Provider set to: xbox-dns
+```
+
+### Добавление собственного DNS
+
+1. Откройте `dnscrypt-proxy/dnscrypt-proxy.toml`
+2. Найдите секцию `[static]`
+3. Добавьте новый DNS:
+
+```toml
+[static.my-dns]
+stamp = "sdns://..." # DNS stamp в формате DNSCrypt
+```
+
+4. Добавьте в `.env`:
+
+```bash
+DNS_PROVIDER=my-dns
+```
+
 
 ## API Endpoints
 
@@ -136,22 +186,24 @@ docker-compose logs squid | grep -i request
 ## Структура проекта
 
 ```
-├── docker-compose.yml      # Main config
-├── .gitattributes         # Enforce LF for scripts
+├── docker-compose.yml         # Main config
+├── .env.example              # Example environment variables
+├── .gitattributes            # Enforce LF for scripts
 │
 ├── dnscrypt-proxy/
 │   ├── Dockerfile
-│   ├── start.sh
-│   └── dnscrypt-proxy.toml
+│   ├── start.sh              # Entry point
+│   ├── configure-dns.sh      # DNS provider configuration script
+│   └── dnscrypt-proxy.toml   # DNS config with multiple providers
 │
 ├── squid/
 │   └── Dockerfile
 │
 └── app/
     ├── Dockerfile
-    ├── main.py            # FastAPI app
-    ├── entrypoint.sh      # Setup iptables + run uvicorn
-    └── requirements.txt
+    ├── main.py               # FastAPI app with DNS leak testing
+    ├── entrypoint.sh         # Setup iptables + run uvicorn
+    └── requirements.txt      # Python dependencies
 ```
 
 ## Полезные команды

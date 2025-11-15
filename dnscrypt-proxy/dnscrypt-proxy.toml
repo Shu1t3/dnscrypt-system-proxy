@@ -1,4 +1,4 @@
-server_names = ["comss-doh"]
+server_names = []
 max_clients = 250
 ipv4_servers = true
 ipv6_servers = false
@@ -66,3 +66,6 @@ prefix = ""
 
 [static.comss-doh]
 stamp = "sdns://AgcAAAAAAAAAAAAQcm91dGVyLmNvbXNzLm9uZQovZG5zLXF1ZXJ5"
+
+[static.xbox-dns]
+stamp = "sdns://AgcAAAAAAAAAAAALeGJveC1kbnMucnUKL2Rucy1xdWVyeQ"
